@@ -123,3 +123,9 @@ tis/cpp_client/build/*
 log*txt
 
 tvm/
+
+#weights
+model_final_v2_city.pth
+
+datasets/cityscapes/gtFine/
+datasets/cityscapes/leftImg8bit/
