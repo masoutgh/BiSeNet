@@ -47,7 +47,7 @@ class UpSample(nn.Module):
 
 class DetailBranch(nn.Module):
 
-    def __init__(self):
+    def __init__(self, mode='bsnet'):
         super(DetailBranch, self).__init__()
         self.S1 = nn.Sequential(
             ConvBNReLU(3, 64, 3, stride=2),
@@ -63,14 +63,29 @@ class DetailBranch(nn.Module):
             ConvBNReLU(128, 128, 3, stride=1),
             ConvBNReLU(128, 128, 3, stride=1),
         )
+        self.mode = mode
 
-    def forward(self, x):
-        feat = self.S1(x)
-        feat = self.S2(feat)
-        feat = self.S3(feat)
-        return feat
-
-
+    def forward(self, x, feat_dtl1 = None, feat_dtl2 = None ):
+        if (self.mode == 'bsnet'):
+            feat1 = self.S1(x)
+            feat2 = self.S2(feat1)
+            feat3 = self.S3(feat2)
+            return feat1, feat2, feat3
+        
+        elif (self.mode=='depth'):
+            feat1 = self.S1(x)
+            feat2 = self.S2(feat1 + feat_dtl1)
+            feat3 = self.S3(feat2 + feat_dtl2)            
+            return feat3
+        
+    def channel_attention(self, num_channel, ablation=False):
+        # todo add convolution here
+        pool = nn.AdaptiveAvgPool2d(1)
+        conv = nn.Conv2d(num_channel, num_channel, kernel_size=1)
+        # bn = nn.BatchNorm2d(num_channel)
+        activation = nn.Sigmoid() # todo modify the activation function
+        return nn.Sequential(*[pool, conv, activation])
+    
 class StemBlock(nn.Module):
 
     def __init__(self):
@@ -193,8 +208,10 @@ class GELayerS2(nn.Module):
 
 class SegmentBranch(nn.Module):
 
-    def __init__(self):
+    def __init__(self, mode = 'bsnet'):
         super(SegmentBranch, self).__init__()
+        self.mode = mode
+
         self.S1S2 = StemBlock()
         self.S3 = nn.Sequential(
             GELayerS2(16, 32),
@@ -212,15 +229,25 @@ class SegmentBranch(nn.Module):
         )
         self.S5_5 = CEBlock()
 
-    def forward(self, x):
-        feat2 = self.S1S2(x)
-        feat3 = self.S3(feat2)
-        feat4 = self.S4(feat3)
-        feat5_4 = self.S5_4(feat4)
-        feat5_5 = self.S5_5(feat5_4)
-        return feat2, feat3, feat4, feat5_4, feat5_5
+    def forward(self, x, feat_main2 = None, feat_main3 = None, feat_main4 = None, feat_main5_4 = None):
+        if (self.mode =='bsnet'):
 
+            feat2 = self.S1S2(x)
+            feat3 = self.S3(feat2)
+            feat4 = self.S4(feat3)
+            feat5_4 = self.S5_4(feat4)
+            feat5_5 = self.S5_5(feat5_4)
+            return feat2, feat3, feat4, feat5_4, feat5_5
 
+        elif (self.mode == 'depth'):
+
+            feat2 = self.S1S2(x)
+            feat3 = self.S3(feat2 + feat_main2)
+            feat4 = self.S4(feat3 + feat_main3)
+            feat5_4 = self.S5_4(feat4 + feat_main4)
+            feat5_5 = self.S5_5(feat5_4 + feat_main5_4)
+            return feat2, feat3, feat4, feat5_4, feat5_5
+       
 class BGALayer(nn.Module):
 
     def __init__(self):
@@ -281,7 +308,6 @@ class BGALayer(nn.Module):
         return out
 
 
-
 class SegmentHead(nn.Module):
 
     def __init__(self, in_chan, mid_chan, n_classes, up_factor=8, aux=True):
@@ -320,27 +346,66 @@ class BiSeNetV2(nn.Module):
 
         ## TODO: what is the number of mid chan ?
         self.head = SegmentHead(128, 1024, n_classes, up_factor=8, aux=False)
+        '''
+        if self.aux_mode == 'train':
+            self.aux2 = SegmentHead(16, 128, n_classes, up_factor=4)
+            self.aux3 = SegmentHead(32, 128, n_classes, up_factor=8)
+            self.aux4 = SegmentHead(64, 128, n_classes, up_factor=16)
+            self.aux5_4 = SegmentHead(128, 128, n_classes, up_factor=32)
+        '''
         if self.aux_mode == 'train':
             self.aux2 = SegmentHead(16, 128, n_classes, up_factor=4)
             self.aux3 = SegmentHead(32, 128, n_classes, up_factor=8)
             self.aux4 = SegmentHead(64, 128, n_classes, up_factor=16)
             self.aux5_4 = SegmentHead(128, 128, n_classes, up_factor=32)
 
+            #BiSeNet v2 with depth
+
+            self.detail_depth = DetailBranch(mode='depth')
+            self.segment_depth = SegmentBranch(mode='depth')
+            self.bga_depth = BGALayer()
+            self.head_depth = SegmentHead(128, 1024, n_classes, up_factor=8, aux=False)
+            
+            self.aux2_depth = SegmentHead(16, 128, n_classes, up_factor=4)
+            self.aux3_depth = SegmentHead(32, 128, n_classes, up_factor=8)
+            self.aux4_depth = SegmentHead(64, 128, n_classes, up_factor=16)
+            self.aux5_4_depth = SegmentHead(128, 128, n_classes, up_factor=32)
+
         self.init_weights()
 
-    def forward(self, x):
-        size = x.size()[2:]
-        feat_d = self.detail(x)
+    def forward(self, x, depth):
+
+        feat_dtl1, feat_dtl2, feat_dtl3 = self.detail(x)
         feat2, feat3, feat4, feat5_4, feat_s = self.segment(x)
-        feat_head = self.bga(feat_d, feat_s)
+        feat_head = self.bga(feat_dtl3, feat_s)
 
         logits = self.head(feat_head)
+        '''
         if self.aux_mode == 'train':
             logits_aux2 = self.aux2(feat2)
             logits_aux3 = self.aux3(feat3)
             logits_aux4 = self.aux4(feat4)
             logits_aux5_4 = self.aux5_4(feat5_4)
             return logits, logits_aux2, logits_aux3, logits_aux4, logits_aux5_4
+        '''
+        if self.aux_mode == 'train':
+            logits_aux2 = self.aux2(feat2)
+            logits_aux3 = self.aux3(feat3)
+            logits_aux4 = self.aux4(feat4)
+            logits_aux5_4 = self.aux5_4(feat5_4)
+
+            feat_depth = self.detail_depth(depth, feat_dtl1, feat_dtl2)
+            feat2_depth, feat3_depth, feat4_depth, feat5_4_depth, feat_s_depth = self.segment_depth(depth, feat2, feat3, feat4, feat5_4)
+            feat_head_depth = self.bga_depth(feat_depth, feat_s_depth)
+            logits_depth = self.head_depth(feat_head_depth)
+
+            logits_aux2_depth = self.aux2_depth(feat2_depth)
+            logits_aux3_depth = self.aux3_depth(feat3_depth)
+            logits_aux4_depth = self.aux4_depth(feat4_depth)
+            logits_aux5_4_depth = self.aux5_4_depth(feat5_4_depth)
+            return logits, logits_depth, logits_aux2, logits_aux3, logits_aux4, logits_aux5_4, logits_aux2_depth, logits_aux3_depth, logits_aux4_depth, logits_aux5_4_depth
+
+        
         elif self.aux_mode == 'eval':
             return logits,
         elif self.aux_mode == 'pred':
@@ -348,6 +413,7 @@ class BiSeNetV2(nn.Module):
             return pred
         else:
             raise NotImplementedError
+        
 
     def init_weights(self):
         for name, module in self.named_modules():
@@ -386,6 +452,8 @@ class BiSeNetV2(nn.Module):
             else:
                 add_param_to_list(child, wd_params, nowd_params)
         return wd_params, nowd_params, lr_mul_wd_params, lr_mul_nowd_params
+
+
 
 
 

@@ -28,31 +28,38 @@ class BaseDataset(Dataset):
 
         with open(annpath, 'r') as fr:
             pairs = fr.read().splitlines()
-        self.img_paths, self.lb_paths = [], []
+        self.img_paths, self.dis_paths, self.lb_paths = [], [], []
         for pair in pairs:
-            imgpth, lbpth = pair.split(',')
+            imgpth, dispth, lbpth = pair.split(',')
             self.img_paths.append(osp.join(dataroot, imgpth))
+            self.dis_paths.append(osp.join(dataroot, dispth))
             self.lb_paths.append(osp.join(dataroot, lbpth))
 
         assert len(self.img_paths) == len(self.lb_paths)
         self.len = len(self.img_paths)
 
     def __getitem__(self, idx):
-        impth, lbpth = self.img_paths[idx], self.lb_paths[idx]
-        img, label = self.get_image(impth, lbpth)
+        impth, dispth, lbpth = self.img_paths[idx], self.dis_paths[idx], self.lb_paths[idx]
+        img, dis, label = self.get_image(impth, dispth, lbpth)
         if not self.lb_map is None:
             label = self.lb_map[label]
-        im_lb = dict(im=img, lb=label)
+        im_lb = dict(im=img, ds=dis, lb=label)
+
         if not self.trans_func is None:
             im_lb = self.trans_func(im_lb)
-        im_lb = self.to_tensor(im_lb)
-        img, label = im_lb['im'], im_lb['lb']
-        return img.detach(), label.unsqueeze(0).detach()
 
-    def get_image(self, impth, lbpth):
+        
+        im_lb = self.to_tensor(im_lb)
+        
+
+        img, dis, label = im_lb['im'], im_lb['ds'], im_lb['lb']
+        return img.detach(), dis.detach(), label.unsqueeze(0).detach()
+
+    def get_image(self, impth, dispth, lbpth):
         img = cv2.imread(impth)[:, :, ::-1].copy()
+        dis = cv2.imread(dispth)[:, :, ::-1].copy()
         label = cv2.imread(lbpth, 0)
-        return img, label
+        return img, dis, label
 
     def __len__(self):
         return self.len

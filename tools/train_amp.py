@@ -148,15 +148,16 @@ def train():
         warmup_ratio=0.1, warmup='exp', last_epoch=-1,)
 
     ## train loop
-    for it, (im, lb) in enumerate(dl):
+    for it, (im, ds, lb) in enumerate(dl):
         im = im.cuda()
+        ds = im.cuda()
         lb = lb.cuda()
 
         lb = torch.squeeze(lb, 1)
 
         optim.zero_grad()
         with amp.autocast(enabled=cfg.use_fp16):
-            logits, *logits_aux = net(im)
+            logits, *logits_aux = net(im, ds)
             loss_pre = criteria_pre(logits, lb)
             loss_aux = [crit(lgt, lb) for crit, lgt in zip(criteria_aux, logits_aux)]
             loss = loss_pre + sum(loss_aux)

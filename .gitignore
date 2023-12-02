@@ -130,3 +130,4 @@ model_final_v2_city.pth
 datasets/cityscapes/gtFine/
 datasets/cityscapes/leftImg8bit/
 datasets/cityscapes/disparity/
+datasets/cityscapes/ai_disparity/

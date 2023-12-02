@@ -23,16 +23,17 @@ class RandomResizedCrop(object):
         if self.size is None:
             return im_lb
 
-        im, lb = im_lb['im'], im_lb['lb']
+        im, ds, lb = im_lb['im'], im_lb['ds'], im_lb['lb']
         assert im.shape[:2] == lb.shape[:2]
 
         crop_h, crop_w = self.size
         scale = np.random.uniform(min(self.scales), max(self.scales))
         im_h, im_w = [math.ceil(el * scale) for el in im.shape[:2]]
         im = cv2.resize(im, (im_w, im_h))
+        ds = cv2.resize(ds, (im_w, im_h))
         lb = cv2.resize(lb, (im_w, im_h), interpolation=cv2.INTER_NEAREST)
 
-        if (im_h, im_w) == (crop_h, crop_w): return dict(im=im, lb=lb)
+        if (im_h, im_w) == (crop_h, crop_w): return dict(im=im, ds=ds, lb=lb)
         pad_h, pad_w = 0, 0
         if im_h < crop_h:
             pad_h = (crop_h - im_h) // 2 + 1
@@ -40,6 +41,7 @@ class RandomResizedCrop(object):
             pad_w = (crop_w - im_w) // 2 + 1
         if pad_h > 0 or pad_w > 0:
             im = np.pad(im, ((pad_h, pad_h), (pad_w, pad_w), (0, 0)))
+            ds = np.pad(im, ((pad_h, pad_h), (pad_w, pad_w), (0, 0)))
             lb = np.pad(lb, ((pad_h, pad_h), (pad_w, pad_w)), 'constant', constant_values=255)
 
         im_h, im_w, _ = im.shape
@@ -47,6 +49,7 @@ class RandomResizedCrop(object):
         sh, sw = int(sh * (im_h - crop_h)), int(sw * (im_w - crop_w))
         return dict(
             im=im[sh:sh+crop_h, sw:sw+crop_w, :].copy(),
+            ds=ds[sh:sh+crop_h, sw:sw+crop_w, :].copy(),
             lb=lb[sh:sh+crop_h, sw:sw+crop_w].copy()
         )
 
@@ -60,10 +63,11 @@ class RandomHorizontalFlip(object):
     def __call__(self, im_lb):
         if np.random.random() < self.p:
             return im_lb
-        im, lb = im_lb['im'], im_lb['lb']
+        im, ds, lb = im_lb['im'], im_lb['ds'], im_lb['lb']
         assert im.shape[:2] == lb.shape[:2]
         return dict(
             im=im[:, ::-1, :],
+            ds=ds[:, ::-1, :],
             lb=lb[:, ::-1],
         )
 
@@ -80,7 +84,7 @@ class ColorJitter(object):
             self.saturation = [max(1-saturation, 0), 1+saturation]
 
     def __call__(self, im_lb):
-        im, lb = im_lb['im'], im_lb['lb']
+        im, ds, lb = im_lb['im'], im_lb['ds'], im_lb['lb']
         assert im.shape[:2] == lb.shape[:2]
         if not self.brightness is None:
             rate = np.random.uniform(*self.brightness)
@@ -91,7 +95,7 @@ class ColorJitter(object):
         if not self.saturation is None:
             rate = np.random.uniform(*self.saturation)
             im = self.adj_saturation(im, rate)
-        return dict(im=im, lb=lb,)
+        return dict(im=im, ds=ds, lb=lb,)
 
     def adj_saturation(self, im, rate):
         M = np.float32([
@@ -128,16 +132,26 @@ class ToTensor(object):
         self.std = std
 
     def __call__(self, im_lb):
-        im, lb = im_lb['im'], im_lb['lb']
+        im, ds, lb = im_lb['im'], im_lb['ds'], im_lb['lb']
         im = im.transpose(2, 0, 1).astype(np.float32)
         im = torch.from_numpy(im).div_(255)
+        ds = ds.transpose(2,0,1).astype(np.float32)
+        min_val = np.min(ds)
+        max_val = np.max(ds)
+        ds = 255.0 * (ds - min_val) / (max_val - min_val)
+        ds = torch.from_numpy(ds).div_(255)
         dtype, device = im.dtype, im.device
         mean = torch.as_tensor(self.mean, dtype=dtype, device=device)[:, None, None]
         std = torch.as_tensor(self.std, dtype=dtype, device=device)[:, None, None]
         im = im.sub_(mean).div_(std).clone()
+        mean_d = (0.275, 0.378, 0.525)
+        std_d = (0.103, 0.279, 0.09)
+        mean_d = torch.as_tensor(mean_d, dtype=dtype, device=device)[:, None, None]
+        std_d = torch.as_tensor(std_d, dtype=dtype, device=device)[:, None, None]
+        ds = ds.sub_(mean_d).div_(std_d).clone()
         if not lb is None:
             lb = torch.from_numpy(lb.astype(np.int64).copy()).clone()
-        return dict(im=im, lb=lb)
+        return dict(im=im, ds=ds, lb=lb)
 
 
 class Compose(object):
@@ -172,8 +186,8 @@ class TransformationTrain(object):
 class TransformationVal(object):
 
     def __call__(self, im_lb):
-        im, lb = im_lb['im'], im_lb['lb']
-        return dict(im=im, lb=lb)
+        im, ds, lb = im_lb['im'], im_lb['ds'], im_lb['lb']
+        return dict(im=im, ds=ds, lb=lb)
 
 
 

@@ -143,7 +143,7 @@ class MscEvalV0(object):
             diter = enumerate(dl)
         else:
             diter = enumerate(tqdm(dl))
-        for i, (imgs, label) in diter:
+        for i, (imgs, _, label) in diter:
             imgs = self.sp(imgs)
             N, _, H, W = imgs.shape
             label = label.squeeze(1).cuda()
@@ -158,7 +158,7 @@ class MscEvalV0(object):
                         mode='bilinear', align_corners=True)
 
                 im_sc = im_sc.cuda()
-                logits = net(im_sc)[0]
+                logits = net(im_sc, _)[0]
                 logits = F.interpolate(logits, size=size,
                         mode='bilinear', align_corners=True)
                 probs += torch.softmax(logits, dim=1)
@@ -345,6 +345,7 @@ def eval_model(cfg, net):
             lb_ignore=lb_ignore,
             size_processor=size_processor
     )
+    '''
     logger.info('compute single scale crop metrics')
     metrics = single_crop(net, dl)
     heads.append('ssc')
@@ -354,7 +355,8 @@ def eval_model(cfg, net):
     f1_scores.append(metrics['f1_scores'])
     macro_f1.append(metrics['macro_f1'])
     micro_f1.append(metrics['micro_f1'])
-
+    '''
+    ''''
     ms_flip = MscEvalV0(
             n_classes=cfg.n_cats,
             scales=cfg.eval_scales,
@@ -362,8 +364,10 @@ def eval_model(cfg, net):
             lb_ignore=lb_ignore,
             size_processor=size_processor
     )
+    
     logger.info('compute multi scale flip metrics')
     metrics = ms_flip(net, dl)
+    '''
     heads.append('msf')
     mious.append(metrics['miou'])
     fw_mious.append(metrics['fw_miou'])
@@ -371,7 +375,7 @@ def eval_model(cfg, net):
     f1_scores.append(metrics['f1_scores'])
     macro_f1.append(metrics['macro_f1'])
     micro_f1.append(metrics['micro_f1'])
-
+    '''
     ms_flip_crop = MscEvalCrop(
             n_classes=cfg.n_cats,
             cropsize=cfg.eval_crop,
@@ -381,8 +385,10 @@ def eval_model(cfg, net):
             lb_ignore=lb_ignore,
             size_processor=size_processor
     )
+    
     logger.info('compute multi scale flip crop metrics')
     metrics = ms_flip_crop(net, dl)
+    '''
     heads.append('msfc')
     mious.append(metrics['miou'])
     fw_mious.append(metrics['fw_miou'])
@@ -401,6 +407,7 @@ def eval_model(cfg, net):
             weights, metric, f1_scores)
 
     net.aux_mode = org_aux
+    
     return iou_heads, iou_content, f1_heads, f1_content
 
 
